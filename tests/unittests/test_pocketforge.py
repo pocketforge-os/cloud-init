@@ -110,6 +110,14 @@ def test_duplicate_alias_is_refused_without_mutating_seed(tmp_path):
             + "    surprise: refused\n",
             "surprise",
         ),
+        (
+            VALID_USER_DATA
+            + "write_files:\n"
+            + "  - path: /etc/pocketforge/test\n"
+            + "    source:\n"
+            + "      uri: https://metadata.invalid/config\n",
+            "source",
+        ),
         ("#include\nhttps://metadata.invalid/config\n", "#include"),
     ],
 )

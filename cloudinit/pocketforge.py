@@ -304,6 +304,20 @@ def _validate_user_data(
                 )
             )
 
+    write_files = config.get("write_files", [])
+    if isinstance(write_files, list):
+        for index, entry in enumerate(write_files):
+            if isinstance(entry, dict) and "source" in entry:
+                path = f"write_files.{index}.source"
+                problems.append(
+                    _problem(
+                        filename,
+                        marks,
+                        path,
+                        "write_files source indirection is not allowed",
+                    )
+                )
+
     users = config.get("users", [])
     if not isinstance(users, list):
         problems.append(
