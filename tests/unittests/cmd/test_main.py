@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from cloudinit import features, safeyaml, util
+from cloudinit import features, safeyaml, stages, util
 from cloudinit.cmd import main
 from cloudinit.util import ensure_dir, load_text_file, write_file
 
@@ -175,6 +175,45 @@ class TestMain:
         main.main_init("init", cmdargs)
 
         m_hostname.assert_called_once()
+
+    def test_setup_rejected_stops_before_cache_network_and_handlers(
+        self, cloud_cfg, mocker
+    ):
+        rejected = mock.Mock(pocketforge_rejected=True, dsmode="net")
+
+        def fetch(init, existing):
+            init.datasource = rejected
+            return rejected
+
+        mocker.patch.object(
+            stages.Init, "fetch", autospec=True, side_effect=fetch
+        )
+        persist = mocker.patch(
+            "cloudinit.cmd.main._maybe_persist_instance_data"
+        )
+        instancify = mocker.patch.object(stages.Init, "instancify")
+        network = mocker.patch.object(stages.Init, "apply_network_config")
+        update = mocker.patch.object(stages.Init, "update")
+        consume = mocker.patch.object(stages.Init, "consume_data")
+        cmdargs = MyArgs(
+            debug=False,
+            files=None,
+            force=False,
+            local=True,
+            reporter=None,
+            subcommand="init",
+            skip_log_setup=False,
+        )
+
+        datasource, errors = main.main_init("init", cmdargs)
+
+        assert datasource is rejected
+        assert errors == []
+        persist.assert_not_called()
+        instancify.assert_not_called()
+        network.assert_not_called()
+        update.assert_not_called()
+        consume.assert_not_called()
 
     @mock.patch("cloudinit.cmd.clean.get_parser")
     @mock.patch("cloudinit.cmd.clean.handle_clean_args")

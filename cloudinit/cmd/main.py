@@ -552,6 +552,13 @@ def main_init(name, args):
                 mode,
             )
             return (None, [])
+        if getattr(init.datasource, "pocketforge_rejected", False):
+            LOG.error(
+                "[%s] Exiting after PocketForge rejected the complete seed; "
+                "cache, network, and handlers remain untouched.",
+                mode,
+            )
+            return (init.datasource, [])
         # if in network mode, and the datasource is local
         # then work was done at that stage.
         if mode == sources.DSMODE_NETWORK and init.datasource.dsmode != mode:
