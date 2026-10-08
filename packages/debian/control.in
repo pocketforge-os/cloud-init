@@ -13,6 +13,7 @@ Rules-Requires-Root: no
 
 Package: cloud-init-base
 Architecture: all
+Build-Profiles: <!pkg.pocketforge>
 Depends: cloud-guest-utils | cloud-utils,
          dhcpcd-base,
          iproute2,
@@ -32,8 +33,25 @@ Description: initialization and customization tool for cloud instances
  Cloud-init with minimal dependencies, refer to cloud-init for more
  information.
 
+Package: cloud-init-pocketforge
+Architecture: all
+Build-Profiles: <pkg.pocketforge>
+Depends: iproute2,
+         procps,
+         python3,
+         python3-debconf,
+         python3-requests,
+         ${misc:Depends},
+         ${python3:Depends}
+Conflicts: cloud-init, cloud-init-base
+Replaces: cloud-init, cloud-init-base
+Description: deterministic PocketForge first-boot configuration
+ NoCloud-only cloud-init profile for PocketForge images. This package omits
+ network metadata clients, hotplug support, netplan and cloud-provider extras.
+
 Package: cloud-init-azure
 Architecture: all
+Build-Profiles: <!pkg.pocketforge>
 Depends: cloud-init-base,
          python3-passlib,
          ${misc:Depends},
@@ -43,6 +61,7 @@ Description: Azure specific cloud-init
 
 Package: cloud-init-cloud-sigma
 Architecture: all
+Build-Profiles: <!pkg.pocketforge>
 Depends: cloud-init-base,
          python3-serial,
          ${misc:Depends},
@@ -52,6 +71,7 @@ Description: Cloud Sigma specific cloud-init
 
 Package: cloud-init-smart-os
 Architecture: all
+Build-Profiles: <!pkg.pocketforge>
 Depends: cloud-init-base,
          python3-serial,
          ${misc:Depends},
@@ -61,6 +81,7 @@ Description: Smart OS specific cloud-init
 
 Package: cloud-init
 Architecture: all
+Build-Profiles: <!pkg.pocketforge>
 Depends: cloud-init-base,
          python3-serial,
          python3-passlib,

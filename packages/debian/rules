@@ -3,12 +3,21 @@
 include /usr/share/dpkg/pkg-info.mk
 
 export PYTHONDONTWRITEBYTECODE=1
+export SOURCE_DATE_EPOCH ?= $(shell git log -1 --pretty=%ct)
+
+POCKETFORGE_MESON_ARGS =
+PACKAGE_DEST = cloud-init-base
+ifneq (,$(POCKETFORGE_BUILD))
+POCKETFORGE_MESON_ARGS += -Dpocketforge_profile=true -Ddistro_variant=pocketforge
+POCKETFORGE_MESON_ARGS += -Dbash_completion=false -Dhotplug=false -Dinstall_docs=false
+PACKAGE_DEST = cloud-init-pocketforge
+endif
 
 %:
 	dh $@ --buildsystem meson
 
 override_dh_auto_configure:
-	dh_auto_configure -- -Dinit_system=systemd -Dlibexecdir=lib -Ddistro_templates=chef_client.rb.tmpl,chrony.conf.ubuntu.tmpl,hosts.debian.tmpl,ntp.conf.ubuntu.tmpl,sources.list.ubuntu.deb822.tmpl,sources.list.ubuntu.deb822.tmpl,timesyncd.conf.tmpl -Ddownstream_version=$(DEB_VERSION)
+	dh_auto_configure -- -Dinit_system=systemd -Dlibexecdir=lib -Ddistro_templates=chef_client.rb.tmpl,chrony.conf.ubuntu.tmpl,hosts.debian.tmpl,ntp.conf.ubuntu.tmpl,sources.list.ubuntu.deb822.tmpl,sources.list.ubuntu.deb822.tmpl,timesyncd.conf.tmpl -Ddownstream_version=$(DEB_VERSION) $(POCKETFORGE_MESON_ARGS)
 
 override_dh_auto_test:
 
@@ -22,7 +31,9 @@ override_dh_installsystemd:
 	dh_installsystemd --no-restart-on-upgrade --no-start
 
 override_dh_auto_install:
-	dh_auto_install --destdir=debian/cloud-init-base
+	dh_auto_install --destdir=debian/$(PACKAGE_DEST)
+ifeq (,$(POCKETFORGE_BUILD))
 	install -D -m 0644 ./tools/21-cloudinit.conf debian/cloud-init-base/etc/rsyslog.d/21-cloudinit.conf
 	install -D ./tools/Z99-cloud-locale-test.sh debian/cloud-init-base/etc/profile.d/Z99-cloud-locale-test.sh
 	install -D ./tools/Z99-cloudinit-warnings.sh debian/cloud-init-base/etc/profile.d/Z99-cloudinit-warnings.sh
+endif

@@ -2,7 +2,7 @@
 [Unit]
 # https://docs.cloud-init.io/en/latest/explanation/boot.html
 Description=Cloud-init: Local Stage (pre-network)
-{% if variant in ["almalinux", "azurelinux", "cloudlinux", "ubuntu", "unknown", "debian", "raspberry-pi-os", "rhel"] %}
+{% if variant in ["almalinux", "azurelinux", "cloudlinux", "ubuntu", "unknown", "debian", "pocketforge", "raspberry-pi-os", "rhel"] %}
 DefaultDependencies=no
 {% endif %}
 Wants=network-pre.target
@@ -12,7 +12,7 @@ Before=shutdown.target
 {% if variant in ["almalinux", "azurelinux", "cloudlinux", "rhel"] %}
 Before=firewalld.target
 {% endif %}
-{% if variant in ["ubuntu", "unknown", "debian", "raspberry-pi-os"] %}
+{% if variant in ["ubuntu", "unknown", "debian", "pocketforge", "raspberry-pi-os"] %}
 Before=sysinit.target
 {% endif %}
 Conflicts=shutdown.target

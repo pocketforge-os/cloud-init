@@ -23,6 +23,7 @@ DISTRO_VARIANTS = [
     "netbsd",
     "openbsd",
     "photon",
+    "pocketforge",
     "raspberry-pi-os",
     "rhel",
     "suse",
@@ -44,6 +45,55 @@ class TestRenderCloudCfg:
         with open(outfile) as stream:
             system_cfg = util.load_yaml(stream.read())
         assert system_cfg["system_info"]["distro"] == "ubuntu"
+
+    def test_pocketforge_profile_is_minimal_and_local_only(self, tmpdir):
+        outfile = tmpdir.join("outcfg").strpath
+        subp.subp(
+            self.cmd + ["--variant", "pocketforge", self.tmpl_path, outfile]
+        )
+        with open(outfile) as stream:
+            config = util.load_yaml(stream.read())
+
+        assert config["datasource_list"] == ["NoCloud", "None"]
+        assert config["datasource"]["NoCloud"] == {
+            "fs_label": "POCKETFORGE",
+            "pocketforge": True,
+        }
+        assert config["ssh_pwauth"] is False
+        assert config["ssh_deletekeys"] is False
+        assert config["ssh_genkeytypes"] == []
+        assert config["system_info"]["default_user"] == {
+            "name": "gamer",
+            "lock_passwd": True,
+            "gecos": "PocketForge User",
+            "groups": ["audio", "input", "video", "render"],
+            "sudo": ["ALL=(ALL:ALL) NOPASSWD:ALL"],
+            "shell": "/bin/bash",
+        }
+        assert config["system_info"]["network"] == {
+            "renderers": ["networkd"],
+            "activators": ["networkd"],
+        }
+        assert config["cloud_init_modules"] == [
+            "bootcmd",
+            "write_files",
+            "set_hostname",
+            "update_hostname",
+            "users_groups",
+            "ssh",
+        ]
+        assert config["cloud_config_modules"] == [
+            "keyboard",
+            "locale",
+            "timezone",
+            "runcmd",
+        ]
+        assert config["cloud_final_modules"] == [
+            "write_files_deferred",
+            "scripts_user",
+            "ssh_authkey_fingerprints",
+            "final_message",
+        ]
 
     def test_variant_sets_prefix_in_cloud_cfg_subp(self, tmpdir):
         outfile = tmpdir.join("outcfg").strpath
@@ -96,6 +146,7 @@ class TestRenderCloudCfg:
             "azurelinux": "azureuser",
             "rhel": "cloud-user",
             "centos": "cloud-user",
+            "pocketforge": "gamer",
             "raspberry-pi-os": "pi",
             "unknown": "ubuntu",
         }

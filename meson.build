@@ -14,6 +14,19 @@ init_system = get_option('init_system')
 
 lib_exec_dir = get_option('prefix') / get_option('libexecdir') / 'cloud-init'
 render_tmpl = './tools/render-template'
+pocketforge_profile = get_option('pocketforge_profile')
+distro_variant = get_option('distro_variant')
+hotplug = get_option('hotplug') and not pocketforge_profile
+install_docs = get_option('install_docs') and not pocketforge_profile
+
+if pocketforge_profile and distro_variant != 'pocketforge'
+  error('pocketforge_profile requires -Ddistro_variant=pocketforge')
+endif
+
+render_tmpl_command = [render_tmpl]
+if distro_variant != ''
+  render_tmpl_command += ['--variant', distro_variant]
+endif
 
 is_readthedocs = run_command('bash', '-c', 'echo ${READTHEDOCS}', check: true).stdout().strip()
 
@@ -23,11 +36,94 @@ python = pymod.find_installation('python3')
 # https://mesonbuild.com/FAQ.html#but-i-really-want-to-use-wildcards for downsteam drop-in files
 find = find_program('find')
 
+datasource_allowlist = get_option('datasource_allowlist')
+if pocketforge_profile and datasource_allowlist.length() == 0
+  datasource_allowlist = ['DataSourceNoCloud.py', 'DataSourceNone.py']
+endif
+datasource_excludes = []
+if datasource_allowlist.length() > 0
+  datasource_files = run_command(
+    find,
+    'cloudinit/sources',
+    '-maxdepth', '1',
+    '-type', 'f',
+    '-name', 'DataSource*.py',
+    '-printf', '%f\n',
+    check: true,
+  ).stdout().strip().split('\n')
+  foreach datasource_file : datasource_files
+    if not datasource_allowlist.contains(datasource_file)
+      datasource_excludes += 'sources' / datasource_file
+    endif
+  endforeach
+endif
+
+python_excludes = datasource_excludes
+python_exclude_directories = []
+if pocketforge_profile
+  python_excludes += 'cmd/devel/hotplug_hook.py'
+  config_module_allowlist = [
+    'cc_bootcmd.py',
+    'cc_final_message.py',
+    'cc_keyboard.py',
+    'cc_locale.py',
+    'cc_runcmd.py',
+    'cc_scripts_user.py',
+    'cc_set_hostname.py',
+    'cc_ssh.py',
+    'cc_ssh_authkey_fingerprints.py',
+    'cc_timezone.py',
+    'cc_update_hostname.py',
+    'cc_users_groups.py',
+    'cc_write_files.py',
+    'cc_write_files_deferred.py',
+  ]
+  config_module_files = run_command(
+    find,
+    'cloudinit/config',
+    '-maxdepth', '1',
+    '-type', 'f',
+    '-name', 'cc_*.py',
+    '-printf', '%f\n',
+    check: true,
+  ).stdout().strip().split('\n')
+  foreach config_module_file : config_module_files
+    if not config_module_allowlist.contains(config_module_file)
+      python_excludes += 'config' / config_module_file
+    endif
+  endforeach
+endif
+
+bytecode_files = run_command(
+  find,
+  'cloudinit',
+  '-type', 'f',
+  '(', '-name', '*.pyc', '-o', '-name', '*.pyo', ')',
+  '-printf', '%P\n',
+  check: true,
+).stdout().strip()
+if bytecode_files != ''
+  python_excludes += bytecode_files.split('\n')
+endif
+bytecode_directories = run_command(
+  find,
+  'cloudinit',
+  '-type', 'd',
+  '-name', '__pycache__',
+  '-printf', '%P\n',
+  check: true,
+).stdout().strip()
+if bytecode_directories != ''
+  python_exclude_directories += bytecode_directories.split('\n')
+endif
+
 install_subdir(
   'cloudinit',
   install_dir: python.get_install_dir(),
   install_tag: 'python-runtime',
   install_mode: 'rw-r--r--',
+  exclude_files: python_excludes,
+  exclude_directories: python_exclude_directories,
 )
 
 # Update packaged version strings
@@ -58,13 +154,16 @@ if get_option('bash_completion') and is_readthedocs != 'True'
   )
 endif
 
+runtime_tools = [
+  'tools/ds-identify',
+  'tools/uncloud-init',
+  'tools/write-ssh-key-fingerprints',
+]
+if hotplug
+  runtime_tools += 'tools/hook-hotplug'
+endif
 install_data(
-  [
-    'tools/ds-identify',
-    'tools/hook-hotplug',
-    'tools/uncloud-init',
-    'tools/write-ssh-key-fingerprints',
-  ],
+  runtime_tools,
   install_dir: lib_exec_dir,
   install_mode: 'rwxr-xr-x',
   install_tag: 'bin',
@@ -87,7 +186,9 @@ install_data(
 )
 
 distro_templates = get_option('distro_templates')
-if distro_templates.length() == 0
+if pocketforge_profile
+  templates = []
+elif distro_templates.length() == 0
   templates = run_command(find, 'templates', '-type', 'f', '-name', '*.tmpl', check: true).stdout().strip().split('\n')
 else
   templates = []
@@ -96,25 +197,29 @@ else
   endforeach
 endif
 
-install_data(
-  templates,
-  install_dir: sysconfdir / 'cloud' / 'templates',
-  install_mode: 'rw-r--r--',
-  install_tag: 'config',
-)
+if templates.length() > 0
+  install_data(
+    templates,
+    install_dir: sysconfdir / 'cloud' / 'templates',
+    install_mode: 'rw-r--r--',
+    install_tag: 'config',
+  )
+endif
 
 if init_system == 'systemd' and is_readthedocs != 'True'
   systemd = dependency('systemd')
-  udev = dependency('udev')
   systemd_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
   systemd_generator_dir = systemd.get_variable(pkgconfig: 'systemdsystemgeneratordir')
-  udev_dir = udev.get_variable(pkgconfig: 'udevdir')
-  install_data(
-    'udev/66-azure-ephemeral.rules',
-    install_dir: udev_dir / 'rules.d',
-    install_mode: 'rw-r--r--',
-    install_tag: 'systemd',
-  )
+  if not pocketforge_profile
+    udev = dependency('udev')
+    udev_dir = udev.get_variable(pkgconfig: 'udevdir')
+    install_data(
+      'udev/66-azure-ephemeral.rules',
+      install_dir: udev_dir / 'rules.d',
+      install_mode: 'rw-r--r--',
+      install_tag: 'systemd',
+    )
+  endif
 
   # Must generate systemd templates in root mesonbuild, because nested
   # systemd/meson.build results in builddir @OUTPUT@ macro being doubly-nested
@@ -122,8 +227,7 @@ if init_system == 'systemd' and is_readthedocs != 'True'
   custom_target(
     input: 'systemd/cloud-init-generator.tmpl',
     output: '@BASENAME@',
-    command: [
-      render_tmpl,
+    command: render_tmpl_command + [
       '@INPUT@',
       meson.current_build_dir() / '@OUTPUT@',
     ],
@@ -133,20 +237,20 @@ if init_system == 'systemd' and is_readthedocs != 'True'
     install_tag: 'systemd',
   )
 
+  systemd_template_find_args = [
+    'systemd', '-not', '-name', '*generator*', '-name', '*.tmpl'
+  ]
+  if not hotplug
+    systemd_template_find_args += ['-not', '-name', '*hotplug*']
+  endif
   systemd_templates = run_command(
-    find,
-    'systemd',
-    '-not',
-    '-name', '*generator*',
-    '-name', '*.tmpl',
-    check: true,
+    find, systemd_template_find_args, check: true
   )
   foreach template : systemd_templates.stdout().strip().split('\n')
     custom_target(
       input: template,
       output: '@BASENAME@',
-      command: [
-        render_tmpl,
+      command: render_tmpl_command + [
         '@INPUT@',
         meson.current_build_dir() / '@OUTPUT@',
       ],
@@ -168,10 +272,18 @@ if init_system == 'systemd' and is_readthedocs != 'True'
   endif
 
   # Allow for downstream supplements of services files meson.build changes
+  systemd_unit_find_args = [
+    'systemd', '(', '-name', '*.service', '-o', '-name', '*.target',
+    '-o', '-name', '*.socket', ')'
+  ]
+  if not hotplug
+    systemd_unit_find_args += ['-not', '-name', '*hotplug*']
+  endif
+  systemd_units = run_command(
+    find, systemd_unit_find_args, check: true
+  ).stdout().strip().split('\n')
   install_data(
-    run_command(find, 'systemd', '-name', '*.service', check: true).stdout().strip().split('\n')
-    + run_command(find, 'systemd', '-name', '*.target', check: true).stdout().strip().split('\n')
-    + run_command(find, 'systemd', '-name', '*.socket', check: true).stdout().strip().split('\n'),
+    systemd_units,
     install_dir: systemd_unit_dir,
     install_mode: 'rw-r--r--',
     install_tag: 'systemd',
@@ -247,8 +359,7 @@ endif
 custom_target(
   input: 'config/cloud.cfg.tmpl',
   output: 'cloud.cfg',
-  command: [
-    render_tmpl,
+  command: render_tmpl_command + [
     '--is-yaml', '@INPUT@',
     meson.current_build_dir() / '@OUTPUT@',
   ],
@@ -259,34 +370,36 @@ custom_target(
 )
 
 # Docs and Examples:
-install_man(['doc/man/cloud-init.1', 'doc/man/cloud-id.1', 'doc/man/cloud-init-per.1'])
-examples = run_command(find, 'doc/examples', '-name', '*.txt', '-o', '-name', '*.yaml', check: true)
-install_data(
-  examples.stdout().strip().split('\n'),
-  install_dir: get_option('datadir') / 'doc' / 'cloud-init' / 'examples',
-  install_mode: 'rw-r--r--',
-  install_tag: 'doc',
-)
-install_data(
-  [
-    'doc/status.txt',
-    'doc/userdata.txt',
-    'doc/var-lib-cloud.txt',
-  ],
-  install_dir: get_option('datadir') / 'doc' / 'cloud-init',
-  install_mode: 'rw-r--r--',
-  install_tag: 'doc',
-)
-install_data(
-  [
-    'doc/examples/seed/README',
-    'doc/examples/seed/meta-data',
-    'doc/examples/seed/user-data',
-  ],
-  install_dir: get_option('datadir') / 'doc' / 'cloud-init' / 'examples' / 'seed',
-  install_mode: 'rw-r--r--',
-  install_tag: 'doc',
-)
+if install_docs
+  install_man(['doc/man/cloud-init.1', 'doc/man/cloud-id.1', 'doc/man/cloud-init-per.1'])
+  examples = run_command(find, 'doc/examples', '-name', '*.txt', '-o', '-name', '*.yaml', check: true)
+  install_data(
+    examples.stdout().strip().split('\n'),
+    install_dir: get_option('datadir') / 'doc' / 'cloud-init' / 'examples',
+    install_mode: 'rw-r--r--',
+    install_tag: 'doc',
+  )
+  install_data(
+    [
+      'doc/status.txt',
+      'doc/userdata.txt',
+      'doc/var-lib-cloud.txt',
+    ],
+    install_dir: get_option('datadir') / 'doc' / 'cloud-init',
+    install_mode: 'rw-r--r--',
+    install_tag: 'doc',
+  )
+  install_data(
+    [
+      'doc/examples/seed/README',
+      'doc/examples/seed/meta-data',
+      'doc/examples/seed/user-data',
+    ],
+    install_dir: get_option('datadir') / 'doc' / 'cloud-init' / 'examples' / 'seed',
+    install_mode: 'rw-r--r--',
+    install_tag: 'doc',
+  )
+endif
 
 # Create expected packaging directory structure
 meson.add_install_script('sh', '-c', 'mkdir -p ${DESTDIR}/' + sysconfdir + '/cloud/clean.d')

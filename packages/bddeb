@@ -32,10 +32,7 @@ def find_root():
 if "avoid-pep8-E402-import-not-top-of-file":
     # Use the util functions from cloudinit
     sys.path.insert(0, find_root())
-    from cloudinit import subp
-    from cloudinit import util
-    from cloudinit import temp_utils
-    from cloudinit import templater
+    from cloudinit import subp, temp_utils, templater, util
 
 DEBUILD_ARGS = ["-S", "-d"]
 
@@ -188,7 +185,15 @@ def read_version_from_meson():
         sys.exit(1)
     with temp_utils.tempdir(needs_exe=True) as tdir:
         builddir = os.path.abspath(os.path.join(tdir, "builddir"))
-        subp.subp(["meson", "setup", builddir, "-Dinit_system=systemd"])
+        subp.subp(
+            [
+                "meson",
+                "setup",
+                builddir,
+                "-Dinit_system=systemd",
+                "-Dbash_completion=false",
+            ]
+        )
         out, _ = subp.subp(["meson", "introspect", "--projectinfo", builddir])
     version = json.loads(out)["version"]
     try:
@@ -314,6 +319,8 @@ def main():
         args.debuild_args.extend(["-e%s" % args.signuser])
 
     os.environ["INIT_SYSTEM"] = args.init_system
+    if os.environ.get("POCKETFORGE_BUILD"):
+        os.environ["DEB_BUILD_PROFILES"] = "pkg.pocketforge"
 
     capture = True
     if args.verbose:
@@ -371,7 +378,17 @@ def main():
             "Running 'debuild %s' in %r" % (" ".join(args.debuild_args), xdir)
         )
         with util.chdir(xdir):
-            cmd = ["debuild", "--preserve-envvar", "INIT_SYSTEM"]
+            cmd = [
+                "debuild",
+                "--preserve-envvar",
+                "INIT_SYSTEM",
+                "--preserve-envvar",
+                "POCKETFORGE_BUILD",
+                "--preserve-envvar",
+                "SOURCE_DATE_EPOCH",
+                "--preserve-envvar",
+                "DEB_BUILD_PROFILES",
+            ]
             if args.debuild_args:
                 cmd.extend(args.debuild_args)
             subp.subp(cmd, capture=capture)
@@ -384,7 +401,12 @@ def main():
                 continue
             shutil.move(full_fn, base_fn)
             print("Wrote %r" % (base_fn))
-            if base_fn.startswith("cloud-init-base"):
+            package_prefix = (
+                "cloud-init-pocketforge"
+                if os.environ.get("POCKETFORGE_BUILD")
+                else "cloud-init-base"
+            )
+            if base_fn.startswith(package_prefix):
                 # Add in the local link
                 util.del_file(link_fn)
                 os.symlink(base_fn, link_fn)

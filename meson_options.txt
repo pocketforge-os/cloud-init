@@ -3,3 +3,8 @@ option('distro_templates', type: 'array', value: [], description: 'Distro templa
 option('disable_sshd_keygen', type: 'boolean', value: false, description: 'Provide systemd service to disable sshd-keygen if present to avoid races with cloud-init.')
 option('bash_completion', type: 'boolean', value: true, description: 'Bash completion for cloud-init.')
 option('downstream_version', type: 'string', value: '@DOWNSTREAM_VERSION@', description: 'Optional downstream package version if different than upstream release. Used by packagers')
+option('distro_variant', type: 'string', value: '', description: 'Render config and units for an explicit distro variant.')
+option('datasource_allowlist', type: 'array', value: [], description: 'Install only these DataSource*.py modules. Empty installs every datasource.')
+option('hotplug', type: 'boolean', value: true, description: 'Install cloud-init hotplug hooks and units.')
+option('install_docs', type: 'boolean', value: true, description: 'Install manual pages, examples, and reference documentation.')
+option('pocketforge_profile', type: 'boolean', value: false, description: 'Select the PocketForge NoCloud-only install profile.')
