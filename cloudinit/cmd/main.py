@@ -553,6 +553,7 @@ def main_init(name, args):
             )
             return (None, [])
         if getattr(init.datasource, "pocketforge_rejected", False):
+            util.write_file(init.paths.get_runpath(".skip-network"), "")
             LOG.error(
                 "[%s] Exiting after PocketForge rejected the complete seed; "
                 "cache, network, and handlers remain untouched.",

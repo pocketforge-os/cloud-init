@@ -182,6 +182,7 @@ class TestMain:
         rejected = mock.Mock(pocketforge_rejected=True, dsmode="net")
 
         def fetch(init, existing):
+            rejected.paths = init.paths
             init.datasource = rejected
             return rejected
 
@@ -209,6 +210,7 @@ class TestMain:
 
         assert datasource is rejected
         assert errors == []
+        assert os.path.exists(datasource.paths.get_runpath(".skip-network"))
         persist.assert_not_called()
         instancify.assert_not_called()
         network.assert_not_called()
