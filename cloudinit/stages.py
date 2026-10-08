@@ -1029,7 +1029,9 @@ class Init:
 
     def _apply_netcfg_names(self, netcfg):
         try:
-            LOG.debug("applying net config names for %s", netcfg)
+            LOG.debug(
+                "applying net config names for sections=%s", sorted(netcfg)
+            )
             self.distro.networking.apply_network_config_names(netcfg)
         except Exception as e:
             LOG.warning("Failed to rename devices: %s", e)
@@ -1107,10 +1109,10 @@ class Init:
 
         # rendering config
         LOG.info(
-            "Applying network configuration from %s bringup=%s: %s",
+            "Applying network configuration from %s bringup=%s sections=%s",
             src,
             bring_up,
-            netcfg,
+            sorted(netcfg),
         )
 
         sem = self._get_per_boot_network_semaphore()

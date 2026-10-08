@@ -1577,10 +1577,51 @@ class TestMountCb:
             in m_subp.call_args_list
         )
 
+    @mock.patch(M_PATH + "is_Linux", autospec=True, return_value=True)
+    @mock.patch(M_PATH + "is_BSD", autospec=True, return_value=False)
+    @mock.patch(M_PATH + "subp.subp")
+    @mock.patch("cloudinit.temp_utils.tempdir", autospec=True)
+    def test_explicit_rw_mount_option(
+        self, m_tmpdir, m_subp, _m_is_bsd, _m_is_linux
+    ):
+        m_tmpdir.return_value.__enter__ = mock.Mock(
+            autospec=True, return_value="/tmp/fake"
+        )
+        m_tmpdir.return_value.__exit__ = mock.Mock(
+            autospec=True, return_value=True
+        )
+
+        util.mount_cb(
+            "/dev/fake0", mock.Mock(), mtype="vfat", mount_options="rw"
+        )
+
+        assert (
+            mock.call(
+                [
+                    "mount",
+                    "-o",
+                    "rw",
+                    "-t",
+                    "vfat",
+                    "/dev/fake0",
+                    "/tmp/fake",
+                ],
+                update_env=None,
+            )
+            in m_subp.call_args_list
+        )
+
     @pytest.mark.parametrize("invalid_mtype", [int(0), float(0.0), dict()])
     def test_typeerror_raised_for_invalid_mtype(self, invalid_mtype):
         with pytest.raises(TypeError):
             util.mount_cb(mock.Mock(), mock.Mock(), mtype=invalid_mtype)
+
+    @pytest.mark.parametrize("mount_options", ["", "rw,exec", "bind", None])
+    def test_valueerror_raised_for_invalid_mount_options(self, mount_options):
+        with pytest.raises(ValueError, match="mount_options"):
+            util.mount_cb(
+                mock.Mock(), mock.Mock(), mount_options=mount_options
+            )
 
     @mock.patch(M_PATH + "subp.subp")
     def test_already_mounted_does_not_mount_or_umount_anything(

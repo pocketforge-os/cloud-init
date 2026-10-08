@@ -481,6 +481,60 @@ class TestNetworkdRenderState:
             config = yaml.safe_load(config)
             return network_state.parse_net_config_data(config["network"])
 
+    def test_pocketforge_wifi_renders_supplicant_without_dhcp_shadow(
+        self, tmp_path
+    ):
+        config = """\
+network:
+  version: 2
+  wifis:
+    wlan0:
+      dhcp4: true
+      regulatory-domain: GB
+      access-points:
+        Bench Network:
+          password: ext:net00
+"""
+        ns = self._parse_network_state_from_config(config)
+        renderer = networkd.Renderer()
+
+        renderer.render_network_state(ns, target=str(tmp_path))
+
+        wpa = tmp_path / "etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+        assert wpa.stat().st_mode & 0o777 == 0o600
+        contents = wpa.read_text()
+        assert "country=GB" in contents
+        assert "psk=ext:net00" in contents
+        assert "Bench Network" not in contents
+        assert not (
+            tmp_path / "etc/systemd/network/10-cloud-init-wlan0.network"
+        ).exists()
+
+    def test_pocketforge_wifi_world_domain_has_visible_warning(
+        self, tmp_path, caplog
+    ):
+        config = """\
+network:
+  version: 2
+  wifis:
+    wlan0:
+      dhcp4: true
+      access-points:
+        Bench:
+          password: ext:net00
+"""
+        ns = self._parse_network_state_from_config(config)
+
+        networkd.Renderer().render_network_state(ns, target=str(tmp_path))
+
+        assert "regulatory domain omitted; using 00" in caplog.text
+        assert (
+            "country=00"
+            in (
+                tmp_path / "etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+            ).read_text()
+        )
+
     def test_networkd_render_with_optional(self):
         with mock.patch("cloudinit.net.get_interfaces_by_mac"):
             ns = self._parse_network_state_from_config(V2_CONFIG_OPTIONAL)

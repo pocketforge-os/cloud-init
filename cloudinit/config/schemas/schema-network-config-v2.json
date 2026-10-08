@@ -190,6 +190,35 @@
         }
       }
     },
+    "mapping_wifi": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/mapping_physical"
+        }
+      ],
+      "properties": {
+        "regulatory-domain": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2}$"
+        },
+        "access-points": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "password"
+            ],
+            "properties": {
+              "password": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "mapping_bond": {
       "allOf": [
         {
@@ -419,6 +448,12 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/mapping_physical"
+          }
+        },
+        "wifis": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/mapping_wifi"
           }
         },
         "bonds": {

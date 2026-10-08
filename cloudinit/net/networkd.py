@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from cloudinit import subp, util
+from cloudinit import atomic_helper, pocketforge, subp, util
 from cloudinit.net import renderer, should_add_gateway_onlink_flag
 from cloudinit.net.network_state import NetworkState
 
@@ -136,6 +136,10 @@ class Renderer(renderer.Renderer):
         )
         self.network_conf_dir = config.get(
             "network_conf_dir", "/etc/systemd/network/"
+        )
+        self.wpa_supplicant_conf = config.get(
+            "wpa_supplicant_conf",
+            "/etc/wpa_supplicant/wpa_supplicant-wlan0.conf",
         )
 
     def generate_match_section(self, iface, cfg: CfgParser):
@@ -348,6 +352,17 @@ class Renderer(renderer.Renderer):
             network_dir = subp.target_path(target) + network_dir
 
         util.ensure_dir(network_dir)
+
+        if network_state.version == 2 and network_state.config.get("wifis"):
+            rendered_wpa = pocketforge.render_wpa_config(network_state.config)
+            if rendered_wpa.warning:
+                LOG.warning(rendered_wpa.warning)
+            wpa_path = self.wpa_supplicant_conf
+            if target:
+                wpa_path = subp.target_path(target) + wpa_path
+            atomic_helper.write_file(
+                wpa_path, rendered_wpa.content, mode=0o600, omode="w"
+            )
 
         network = self._render_content(network_state)
         vlan_netdev = network.pop("vlan_netdev", {})

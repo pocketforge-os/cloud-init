@@ -503,6 +503,30 @@ class TestInit:
             ):
                 assert not self.tmpdir.join(path).exists()
 
+    @mock.patch("cloudinit.net.get_interfaces_by_mac", return_value={})
+    @mock.patch("cloudinit.distros.ubuntu.Distro")
+    def test_apply_network_log_does_not_include_wifi_secret(
+        self, m_ubuntu, m_macs, caplog
+    ):
+        secret = "stage-network-log-secret-canary"
+        net_cfg = {
+            "version": 2,
+            "wifis": {
+                "wlan0": {
+                    "dhcp4": True,
+                    "access-points": {"Bench": {"password": secret}},
+                }
+            },
+        }
+        self.init._find_networking_config = mock.Mock(
+            return_value=(net_cfg, NetworkConfigSource.DS)
+        )
+
+        self.init.apply_network_config(True)
+
+        assert secret not in caplog.text
+        assert "sections=['version', 'wifis']" in caplog.text
+
     @mock.patch("cloudinit.distros.ubuntu.Distro")
     @mock.patch.dict(
         sources.DataSource.default_update_events,

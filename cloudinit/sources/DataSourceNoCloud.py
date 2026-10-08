@@ -13,7 +13,7 @@ import logging
 import os
 from functools import partial
 
-from cloudinit import dmi, lifecycle, sources, util
+from cloudinit import dmi, lifecycle, pocketforge, safeyaml, sources, util
 from cloudinit.net import eni
 
 LOG = logging.getLogger(__name__)
@@ -34,6 +34,15 @@ class DataSourceNoCloud(sources.DataSource):
         self.supported_seed_starts = ("/", "file://")
         self._network_config = None
         self._network_eni = None
+        self.pocketforge_rejected = False
+        self.pocketforge_mode = False
+
+    def _unpickle(self, ci_pkl_version: int) -> None:
+        super()._unpickle(ci_pkl_version)
+        if not hasattr(self, "pocketforge_rejected"):
+            self.pocketforge_rejected = False
+        if not hasattr(self, "pocketforge_mode"):
+            self.pocketforge_mode = False
 
     def __str__(self):
         """append seed and dsmode info when they contain non-default values"""
@@ -48,19 +57,26 @@ class DataSourceNoCloud(sources.DataSource):
             )
         )
 
-    def _get_devices(self, label):
+    def _get_devices(self, label, exact=False):
         fslist = util.find_devs_with("TYPE=vfat")
-        fslist.extend(util.find_devs_with("TYPE=iso9660"))
+        if not exact:
+            fslist.extend(util.find_devs_with("TYPE=iso9660"))
 
         label_list = util.find_devs_with("LABEL=%s" % label.upper())
-        label_list.extend(util.find_devs_with("LABEL=%s" % label.lower()))
-        label_list.extend(util.find_devs_with("LABEL_FATBOOT=%s" % label))
+        if not exact:
+            label_list.extend(util.find_devs_with("LABEL=%s" % label.lower()))
+            label_list.extend(util.find_devs_with("LABEL_FATBOOT=%s" % label))
 
         devlist = list(set(fslist) & set(label_list))
         devlist.sort(reverse=True)
         return devlist
 
     def _get_data(self):
+        pocketforge_mode = self.ds_cfg.get("pocketforge") is True
+        self.pocketforge_mode = pocketforge_mode
+        if pocketforge_mode and self.ds_cfg.get("fs_label") != "POCKETFORGE":
+            LOG.error("PocketForge NoCloud mode requires fs_label=POCKETFORGE")
+            return False
         defaults = {
             "instance-id": "nocloud",
             "dsmode": self.dsmode,
@@ -78,7 +94,11 @@ class DataSourceNoCloud(sources.DataSource):
             # Parse the system serial label from dmi. If not empty, try parsing
             # like the command line
             md = {}
-            serial = dmi.read_dmi_data("system-serial-number")
+            serial = (
+                None
+                if pocketforge_mode
+                else dmi.read_dmi_data("system-serial-number")
+            )
             if serial and load_cmdline_data(md, serial):
                 found.append("dmi")
                 mydata = _merge_new_seed(mydata, {"meta-data": md})
@@ -89,7 +109,7 @@ class DataSourceNoCloud(sources.DataSource):
         try:
             # Parse the kernel command line, getting data passed in
             md = {}
-            if load_cmdline_data(md):
+            if not pocketforge_mode and load_cmdline_data(md):
                 found.append("cmdline")
                 mydata = _merge_new_seed(mydata, {"meta-data": md})
         except Exception:
@@ -102,7 +122,7 @@ class DataSourceNoCloud(sources.DataSource):
             "optional": ["vendor-data", "network-config"],
         }
 
-        for path in self.seed_dirs:
+        for path in [] if pocketforge_mode else self.seed_dirs:
             try:
                 seeded = util.pathprefix2dict(path, **pp2d_kwargs)
                 found.append(path)
@@ -115,29 +135,72 @@ class DataSourceNoCloud(sources.DataSource):
         # If the datasource config had a 'seedfrom' entry, then that takes
         # precedence over a 'seedfrom' that was found in a filesystem
         # but not over external media
-        if self.ds_cfg.get("seedfrom"):
+        if not pocketforge_mode and self.ds_cfg.get("seedfrom"):
             found.append("ds_config_seedfrom")
             mydata["meta-data"]["seedfrom"] = self.ds_cfg["seedfrom"]
 
         # fields appropriately named can also just come from the datasource
         # config (ie, 'user-data', 'meta-data', 'vendor-data' there)
-        if "user-data" in self.ds_cfg and "meta-data" in self.ds_cfg:
+        if (
+            not pocketforge_mode
+            and "user-data" in self.ds_cfg
+            and "meta-data" in self.ds_cfg
+        ):
             mydata = _merge_new_seed(mydata, self.ds_cfg)
             found.append("ds_config")
 
         def _pp2d_callback(mp, data):
             return util.pathprefix2dict(mp, **data)
 
+        def _pocketforge_callback(mp):
+            seed = pocketforge.load_seed(mp)
+            pocketforge.install_wifi(seed)
+            return {
+                "meta-data": seed.metadata,
+                "user-data": seed.user_data.encode("utf-8"),
+                "network-config": safeyaml.dumps(
+                    pocketforge.redacted_network_config(seed.network_config),
+                    explicit_start=False,
+                    explicit_end=False,
+                    noalias=True,
+                ),
+            }
+
+        def _pocketforge_refusal_callback(mp, refusal):
+            return pocketforge.write_refusal_status(mp, refusal)
+
         label = self.ds_cfg.get("fs_label", "cidata")
         if label is not None:
-            for dev in self._get_devices(label):
+            for dev in self._get_devices(label, exact=pocketforge_mode):
                 try:
                     LOG.debug("Attempting to use data from %s", dev)
 
                     try:
-                        seeded = util.mount_cb(
-                            dev, _pp2d_callback, pp2d_kwargs
+                        if pocketforge_mode:
+                            seeded = util.mount_cb(dev, _pocketforge_callback)
+                        else:
+                            seeded = util.mount_cb(
+                                dev, _pp2d_callback, pp2d_kwargs
+                            )
+                    except pocketforge.SeedRefused as refusal:
+                        LOG.warning("PocketForge seed refused: %s", refusal)
+                        util.mount_cb(
+                            dev,
+                            _pocketforge_refusal_callback,
+                            refusal,
+                            mount_options="rw",
                         )
+                        try:
+                            pocketforge.write_setup_rejected(refusal)
+                        except (OSError, ValueError):
+                            util.logexc(
+                                LOG,
+                                "Failed to publish PocketForge SetupRejected",
+                            )
+                        self.pocketforge_rejected = True
+                        mydata["user-data"] = b""
+                        found.append(dev)
+                        break
                     except ValueError:
                         LOG.warning(
                             "device %s with label=%s not a valid seed.",

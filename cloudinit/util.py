@@ -1988,6 +1988,7 @@ def mount_cb(
     mtype=None,
     update_env_for_mount=None,
     log_error=True,
+    mount_options="ro",
 ):
     """
     Mount the device, call method 'callback' passing the directory
@@ -1997,6 +1998,9 @@ def mount_cb(
     mtype is a filesystem type.  it may be a list, string (a single fsname)
     or a list of fsnames.
     """
+
+    if mount_options not in {"ro", "rw"}:
+        raise ValueError("mount_options must be either 'ro' or 'rw'")
 
     if isinstance(mtype, str):
         mtypes = [mtype]
@@ -2038,7 +2042,7 @@ def mount_cb(
             for mtype in mtypes:
                 mountpoint = None
                 try:
-                    mountcmd = ["mount", "-o", "ro"]
+                    mountcmd = ["mount", "-o", mount_options]
                     if mtype:
                         mountcmd.extend(["-t", mtype])
                     mountcmd.append(device)

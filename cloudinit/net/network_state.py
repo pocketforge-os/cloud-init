@@ -811,13 +811,14 @@ class NetworkStateInterpreter:
             self.handle_vlan(vlan_cmd)
 
     def handle_wifis(self, command):
-        LOG.warning(
-            "Wifi configuration is only available to distros with"
-            " netplan rendering support."
-        )
+        # Preserve the v2 Wi-Fi mapping in NetworkState.config. Renderers which
+        # support Wi-Fi consume it there. Do not synthesize a physical
+        # interface for the default DHCP case: PocketForge owns a tuned
+        # 20-wlan0.network and a generated 10-cloud-init file would shadow it.
+        LOG.debug("Preserving v2 Wi-Fi configuration for renderer")
 
     def _v2_common(self, cfg) -> None:
-        LOG.debug("v2_common: handling config:\n%s", cfg)
+        LOG.debug("v2_common: handling interfaces=%s", sorted(cfg))
         for iface, dev_cfg in cfg.items():
             if "nameservers" in dev_cfg:
                 search = dev_cfg.get("nameservers").get("search")

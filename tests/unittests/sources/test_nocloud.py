@@ -1,6 +1,7 @@
 # This file is part of cloud-init. See LICENSE file for license information.
 
 import os
+import pickle
 import textwrap
 from unittest import mock
 
@@ -23,6 +24,144 @@ def common_mocks(mocker):
 
 
 class TestNoCloudDataSource:
+    def test_pocketforge_profile_preflights_and_redacts_before_assignment(
+        self, tmp_path, mocker, paths
+    ):
+        (tmp_path / "user-data.txt").write_text(
+            "#cloud-config\nssh_pwauth: false\ndisable_root: true\n"
+        )
+        (tmp_path / "network-config.yaml").write_text(
+            "version: 2\nwifis:\n  wlan0:\n    dhcp4: true\n"
+            "    access-points:\n      Bench:\n"
+            "        password: unique-seed-canary\n"
+        )
+
+        dmi_read = mocker.patch(
+            "cloudinit.sources.DataSourceNoCloud.dmi.read_dmi_data"
+        )
+        cmdline_read = mocker.patch(
+            "cloudinit.sources.DataSourceNoCloud.load_cmdline_data"
+        )
+        mocker.patch.object(
+            dsNoCloud, "_get_devices", return_value=["/dev/pocketforge"]
+        )
+        mocker.patch("cloudinit.pocketforge.install_wifi")
+
+        def fake_mount(device, callback, data=None, **kwargs):
+            assert device == "/dev/pocketforge"
+            return (
+                callback(str(tmp_path), data)
+                if data
+                else callback(str(tmp_path))
+            )
+
+        mocker.patch("cloudinit.util.mount_cb", side_effect=fake_mount)
+        dsrc = dsNoCloud(
+            sys_cfg={
+                "datasource": {
+                    "NoCloud": {
+                        "pocketforge": True,
+                        "fs_label": "POCKETFORGE",
+                        "seedfrom": "https://metadata.invalid/seed/",
+                        "user-data": "#include\nhttps://metadata.invalid/",
+                        "meta-data": {"instance-id": "remote"},
+                    }
+                }
+            },
+            distro=None,
+            paths=paths,
+        )
+
+        assert dsrc.get_data()
+        assert dsrc.metadata["instance-id"].startswith("pf-")
+        assert dsrc.network_config["wifis"]["wlan0"]["access-points"][
+            "Bench"
+        ] == {"password": "ext:net00"}
+        assert "unique-seed-canary" not in repr(dsrc.network_config)
+        assert b"unique-seed-canary" not in pickle.dumps(dsrc)
+        dmi_read.assert_not_called()
+        cmdline_read.assert_not_called()
+
+    def test_pocketforge_device_search_requires_exact_vfat_label(
+        self, mocker, paths
+    ):
+        def find_devs(query="", path=""):
+            return {
+                "TYPE=vfat": ["/dev/exact", "/dev/lower"],
+                "TYPE=iso9660": ["/dev/iso"],
+                "LABEL=POCKETFORGE": ["/dev/exact", "/dev/iso"],
+                "LABEL=pocketforge": ["/dev/lower"],
+                "LABEL_FATBOOT=POCKETFORGE": [],
+            }.get(query, [])
+
+        mocker.patch(
+            "cloudinit.sources.DataSourceNoCloud.util.find_devs_with",
+            side_effect=find_devs,
+        )
+        datasource = dsNoCloud(sys_cfg={}, distro=None, paths=paths)
+
+        assert datasource._get_devices("POCKETFORGE", exact=True) == [
+            "/dev/exact"
+        ]
+
+    def test_pocketforge_refusal_is_claimed_and_writes_only_status(
+        self, tmp_path, mocker, paths
+    ):
+        (tmp_path / "user-data").write_text(
+            "#cloud-config\nssh_pwauth: true\ndisable_root: true\n"
+        )
+        (tmp_path / "network-config").write_text(
+            "version: 2\nwifis:\n  wlan0:\n    dhcp4: true\n"
+            "    access-points:\n      Bench:\n"
+            "        password: unique-seed-canary\n"
+        )
+        before = {
+            path.name: path.read_bytes()
+            for path in tmp_path.iterdir()
+            if path.is_file()
+        }
+        mocker.patch.object(
+            dsNoCloud, "_get_devices", return_value=["/dev/pocketforge"]
+        )
+        setup_rejected = mocker.patch(
+            "cloudinit.pocketforge.write_setup_rejected"
+        )
+
+        def fake_mount(device, callback, data=None, **kwargs):
+            return (
+                callback(str(tmp_path), data)
+                if data
+                else callback(str(tmp_path))
+            )
+
+        mount = mocker.patch("cloudinit.util.mount_cb", side_effect=fake_mount)
+        dsrc = dsNoCloud(
+            sys_cfg={
+                "datasource": {
+                    "NoCloud": {
+                        "pocketforge": True,
+                        "fs_label": "POCKETFORGE",
+                    }
+                }
+            },
+            distro=None,
+            paths=paths,
+        )
+
+        assert dsrc.get_data()
+        assert dsrc.pocketforge_rejected
+        assert dsrc.userdata_raw == b""
+        assert dsrc.network_config is None
+        assert before == {
+            name: (tmp_path / name).read_bytes() for name in before
+        }
+        status = (tmp_path / "cloud-init-status.txt").read_text()
+        assert "state=refused" in status
+        assert "user-data:2" in status
+        assert "unique-seed-canary" not in status
+        assert mount.call_args_list[-1].kwargs["mount_options"] == "rw"
+        setup_rejected.assert_called_once()
+
     def _test_fs_config_is_read(
         self, fs_label, fs_label_to_search, mocker, paths
     ):
